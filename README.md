@@ -1,18 +1,17 @@
-# WorkBuddy 每日积分领取
+# WorkBuddy 每日积分领取（跨平台 · API 优先）
 
-自动领取 WorkBuddy 客户端「Buddy加油站·今日礼包」积分，解放双手，不再漏签。
+自动领取 WorkBuddy 客户端「Buddy加油站·今日礼包」积分，解放双手，不再漏签。支持 **Windows + macOS**，推荐**读本机登录 token 直调官方接口**，无需模拟鼠标点击、可后台无头运行。
 
 ---
 
 ## 功能特点
 
-- 🖱️ **真实点击**：截图定位左下角卡牌的「立即领取」黑色按钮，用**真实鼠标点击**完成领取（Chromium 会丢弃合成消息，必须真实点击）
-- 🛡️ **安全护栏**：点击前先用 `WindowFromPoint` 校验落点确实归属 WorkBuddy 进程，**绝不误点**前台其它窗口
-- 🔁 **抗抢占重试**：前台有全屏游戏夹住鼠标时自动重切前台、释放 `ClipCursor`，最多重试 30 次，落点不到位就绝不盲点
-- ⏰ **每日定时**：内置每日 08:00 自动领取的自动化配置，可脱离人工长期运行
-- ↩️ **无感执行**：完成后自动归还鼠标位置、`ClipCursor` 与原前台窗口，抢前台约 3 秒
-- 📋 **结果可判**：stdout 输出 `RESULT` 状态码，便于自动化流程判断成功 / 已领 / 失败
-- 🧹 **不脏目录**：调试截图写在 `%TEMP%/wb-credit-claim/`，不污染 skill 自身
+- 🔌 **API 优先**：读桌面客户端本地 token → 调官方签到接口，不抢前台、不怕全屏游戏夹鼠标、可无头运行
+- 🪟🍎 **跨平台**：Windows 与 macOS 共用同一套领取逻辑（`scripts/claim_api.py`，纯标准库）
+- ⏰ **原生定时**：macOS 用 `launchd` LaunchAgent 定时（睡眠错过会唤醒补跑）；Windows 端接 WorkBuddy 每日自动化
+- 🔁 **幂等安全**：今日已领返回 `code=10001`，按成功处理，重复跑不翻车
+- 🛡️ **凭证安全**：token 只读不写、不落日志；脚本也不存储
+- 🆘 **兜底方案**：无 token 文件时，Windows 仍可走截图+真实点击（`scripts/claim_daily.py`）
 
 ---
 
@@ -20,41 +19,55 @@
 
 ### 前提条件
 
-- **仅 Windows**（依赖 `user32` / `gdi32` 的 `ctypes` 与 `PrintWindow`）
-- **Python 3.x + Pillow**（建议装在 WorkBuddy 托管的 venv 里）
-- **WorkBuddy 客户端已安装并处于运行状态**（领取动作发生在客户端窗口内）
-- 屏幕分辨率建议 1920×1080 或更高（按钮定位基于比例坐标，低分屏可能偏移）
+- **Windows**：Python 3.x（推荐 WorkBuddy 托管 venv，纯标准库无需 Pillow）；客户端已登录
+- **macOS**：系统 Python 3（实测 `/usr/bin/python3` 可直接跑）；客户端已登录
+- 客户端必须处于已登录状态（token 由客户端写入本机）
 
-### 方案：Python ctypes（唯一实现）
+### 方案：读 token 直调接口（推荐，Win + Mac 通用）
 
-`scripts/claim_daily.py` 是自包含的生产脚本，无需前台、不被遮挡即可截取窗口：
+```bash
+# Windows
+"<managed-python>" "<skill>\scripts\claim_api.py"
+# macOS
+bash "<skill>/macos/checkin.sh"
+```
+
+`--dry-run` 只探测、不实际领取。
+
+### Windows 兜底（截图 + 真实点击）
+
+仅在找不到 token 文件的环境使用：
 
 ```bash
 "<managed-python>" "<skill>\scripts\claim_daily.py"
 ```
 
-> 说明：本 skill 只提供 Python ctypes 一种实现。不提供 PowerShell / Playwright 版本的原因见文末「为什么这样做」——PostMessage 合成输入会被 Chromium 丢弃，UIAutomation 树为空，都不是可行路径。
+### macOS 每日定时（launchd）
 
-### 设为每日自动化
+```bash
+SK=~/.workbuddy/skills/albert-workbuddy-credit-claim
+bash $SK/macos/setup_launchd.sh install            # 默认 11:00 + 20:00
+bash $SK/macos/setup_launchd.sh install 09:30,13:00,21:00   # 自定义时刻
+bash $SK/macos/setup_launchd.sh status             # 查看注册与最近执行
+bash $SK/macos/setup_launchd.sh run                # 立即触发一次
+bash $SK/macos/setup_launchd.sh remove             # 卸载
+```
 
-在 WorkBuddy 里建一条每日定时任务（每天 08:00）：
+### 设为 Windows 每日自动化
 
-- **rrule**：`FREQ=DAILY;BYHOUR=8;BYMINUTE=0`
-- **prompt**：用 Bash 跑上面的脚本，并按 stdout 的 `RESULT` 一句话汇报（成功静默 / 失败才展开说明）
+在 WorkBuddy 建 recurring（`FREQ=DAILY;BYHOUR=8;BYMINUTE=0`），prompt 跑 `claim_api.py`，按 stdout 的 `RESULT` 一句话汇报。
 
 ---
 
-## RESULT 输出说明
+## RESULT / 退出码（API 路径）
 
-| RESULT | 含义 | 建议处理 |
+| 退出码 | 含义 | 处理 |
 | --- | --- | --- |
-| `claimed` | 按钮消失，领取成功 | 回一句「今日积分已领 ✓」 |
-| `button_not_found` | 今天已领过 / 卡牌未显示 | 正常，**不要重试** |
-| `click_no_effect` | 点击后按钮仍在 | 看 `after.png` 确认后重试一次，仍失败则明说失败 |
-| `no_window` | 未找到 WorkBuddy 窗口 | 说明原因，确认客户端在运行 |
-| `window_hidden_in_tray` | 窗口在托盘且唤不醒 | 说明原因，需手动打开客户端 |
-| `cursor_move_blocked` | 鼠标被夹住，落点不到位 | 前台可能被全屏程序占用，说明原因，不盲点 |
-| `point_occluded` | 落点被其它窗口遮挡 | 说明原因，不盲点 |
+| 0 | 成功 / 今日已领（幂等） | 无需处理 |
+| 2 | 配置错误（token 文件缺失/不可读） | 确认客户端已登录，或走兜底方案 |
+| 3 | 网络错误 | 等下次重试 |
+| 4 | 鉴权失败（token 过期） | 打开一次 WorkBuddy 客户端刷新 token |
+| 5 | 接口返回非预期 | 看输出，字段可能已变更 |
 
 ---
 
@@ -62,21 +75,28 @@
 
 ```
 albert-workbuddy-credit-claim/
-├── SKILL.md               # 技能说明与调用约定
-├── README.md              # 本文件（简介）
+├── SKILL.md                          # 技能说明
+├── README.md                         # 本文件
 ├── scripts/
-│   └── claim_daily.py     # 自包含领取脚本
+│   ├── claim_api.py                  # 首选：跨平台读 token 直调接口
+│   └── claim_daily.py                # 兜底：Windows 截图 + 真实点击
+├── macos/
+│   ├── workbuddy_daily_checkin.py    # 引擎（委托 claim_api.py）
+│   ├── checkin.sh                    # launchd 入口
+│   └── setup_launchd.sh              # launchd 安装/状态/触发/卸载
 └── references/
-    └── workflow.md        # 完整工作流、接口勘察与死路清单
+    └── workflow.md                   # 完整工作流、接口勘察与死路清单
 ```
 
 ---
 
-## 为什么这样做（避坑要点）
+## 工作原理与避坑要点
 
-- **不走后端 API**：接口确实存在（`/billing/meter/daily-checkin` 等），但桌面端 Bearer token 存在主进程加密存储，本地拿不到可用的 JWT；Web 端又需另行登录。故改为 UI 真实点击。
-- **不用 UIAutomation**：Electron 未开启可访问性支持，无障碍树为空（`FindAll(Descendants)` 只返回 1 个元素）；要开启必须加启动参数重启，会杀掉当前会话。
-- **不用 PostMessage**：投递给 Chromium 的合成鼠标消息一律被过滤丢弃。
-- **必须校验与还原**：真实点击会短暂抢前台，且若前台是全屏游戏可能把鼠标夹住——所以点击前校验归属、点击后还原焦点/鼠标，被夹住就重试而非盲点。
-
-> 详细勘察过程与全部走不通的尝试，见 `references/workflow.md`。
+- **token 文件位置**（两平台相对路径一致，仅根目录不同）：
+  - Windows：`%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\workbuddy-desktop.info`
+  - macOS：`~/Library/Application Support/CodeBuddyExtension/Data/Public/auth/workbuddy-desktop.info`
+  - 字段取 `auth.accessToken` / `auth.tokenType` / `auth.domain`。
+- **接口 host 是 `www.codebuddy.cn`**，不是 `workbuddy.cn`（后者经 APISIX 网关直接 401）。
+- **不要用 UIAutomation / PostMessage**：Chromium 丢合成输入、Electron 无障碍树为空。
+- **接口无补签**：当天完全离线则错过（连签重置），任何工具都绕不过。
+- 详细勘察与全部走不通的尝试见 `references/workflow.md`。
