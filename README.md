@@ -59,6 +59,24 @@ bash $SK/macos/setup_launchd.sh remove             # 卸载
 
 ---
 
+## 安装（一行命令）
+
+WorkBuddy 从 `~/.workbuddy/skills/` 目录加载技能，所以「安装」= 把仓库放进这个目录。**不是 npm 包，没有 `npm install` 通道**——下面这条命令等价于下载并放进去，装完刷新/重启 WorkBuddy 即可在技能列表看到。
+
+- **Windows (PowerShell)**：
+  ```powershell
+  git clone https://github.com/albert20260828/albert-workbuddy-credit-claim.git "$env:USERPROFILE\.workbuddy\skills\albert-workbuddy-credit-claim"
+  # 若没装 git，改用下载解压：
+  irm https://github.com/albert20260828/albert-workbuddy-credit-claim/archive/refs/heads/main.zip -OutFile $env:TEMP\awcc.zip; Expand-Archive $env:TEMP\awcc.zip $env:TEMP\awcc -Force; Copy-Item "$env:TEMP\awcc\albert-workbuddy-credit-claim-main" "$env:USERPROFILE\.workbuddy\skills\albert-workbuddy-credit-claim" -Recurse -Force
+  ```
+- **macOS / Linux (bash)**：
+  ```bash
+  git clone https://github.com/albert20260828/albert-workbuddy-credit-claim.git ~/.workbuddy/skills/albert-workbuddy-credit-claim
+  ```
+- 或用仓库自带安装脚本：`install.ps1`（Windows）/ `install.sh`（macOS/Linux），重装时会自动 `git pull` 更新。
+
+---
+
 ## RESULT / 退出码（API 路径）
 
 | 退出码 | 含义 | 处理 |
